@@ -4,16 +4,12 @@
   import { graphStore } from '../stores/graph.svelte.js';
   import { imageStore } from '../stores/images.svelte.js';
   import { IPC } from '../../shared/constants.js';
-  import type { NodeGraph, NodeDefinition } from '../../shared/types.js';
+  import type { NodeGraph } from '../../shared/types.js';
   import { getNodeParams } from '../nodeEditor/nodeEditorHelpers.js';
   import { traceInputNodeId } from '../workflowUtils.js';
   import RunWorkflowDialog from './RunWorkflowDialog.svelte';
 
-  let { definitions }: { definitions: NodeDefinition[] } = $props();
-  void definitions; // reserved for future use (e.g. building complete graph)
-
-  // ── Output node status ──────────────────────────────────────────────────────
-  export type OutputNodeStatus = {
+  type OutputNodeStatus = {
     nodeId: string;
     label: string;
     type: 'imageOutputNode';
@@ -33,7 +29,6 @@
 
         const outputPath = (params.outputPath as string) ?? 'source';
         if (outputPath === 'custom') {
-          // Check if driven by a folder path node
           const folderEdge = graphStore.edges.find((e) => e.target === n.id && e.targetHandle === 'folder-in');
           if (folderEdge) {
             const src = graphStore.nodes.find((nd) => nd.id === folderEdge.source);
@@ -65,10 +60,8 @@
   const totalCount = $derived(outputNodeStatuses.length);
   const canRun = $derived(validCount > 0 && !graphStore.batchRunning);
 
-  // ── Dialog ──────────────────────────────────────────────────────────────────
   let showDialog = $state(false);
 
-  // ── Graph serialization ─────────────────────────────────────────────────────
   function serializeGraph(): NodeGraph {
     const sfNodes = $state.snapshot(untrack(() => graphStore.nodes)) as Node[];
     const sfEdges = $state.snapshot(untrack(() => graphStore.edges)) as Edge[];
@@ -90,7 +83,6 @@
     };
   }
 
-  // ── Run ─────────────────────────────────────────────────────────────────────
   async function executeValidNodes(validStatuses: OutputNodeStatus[]) {
     const graph = serializeGraph();
 
@@ -146,7 +138,6 @@
         graphStore.batchRunning = false;
       }
 
-      // Stop if cancelled
       if (!graphStore.batchDone && graphStore.batchError === null) break;
     }
   }
@@ -154,13 +145,10 @@
   function handleRun() {
     const valid = outputNodeStatuses.filter((s) => s.valid);
     const invalid = outputNodeStatuses.filter((s) => !s.valid);
-
-    if (valid.length === 0) return; // button should be disabled, but guard anyway
+    if (valid.length === 0) return;
     if (invalid.length === 0) {
-      // All valid — run immediately
       void executeValidNodes(valid);
     } else {
-      // Some invalid — show dialog
       showDialog = true;
     }
   }
@@ -169,6 +157,13 @@
     showDialog = false;
     void executeValidNodes(statuses.filter((s) => s.valid));
   }
+
+  // Listen for Ctrl+R from the native menu
+  $effect(() => {
+    const handler = () => handleRun();
+    window.ipcRenderer.on(IPC.MENU_RUN_WORKFLOW, handler);
+    return () => window.ipcRenderer.off(IPC.MENU_RUN_WORKFLOW, handler);
+  });
 
   const tooltipText = $derived(
     totalCount === 0
@@ -179,27 +174,10 @@
   );
 </script>
 
-<div class="toolbar">
-  <button class="btn btn--primary run-center" disabled={!canRun} onclick={handleRun} title={tooltipText}>Run Workflow</button>
-</div>
+<button class="btn btn--primary btn--full" disabled={!canRun} onclick={handleRun} title={tooltipText}>
+  Run Workflow
+</button>
 
 {#if showDialog}
   <RunWorkflowDialog statuses={outputNodeStatuses} onRun={handleDialogRun} onCancel={() => (showDialog = false)} />
 {/if}
-
-<style>
-  .toolbar {
-    height: 38px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 10px;
-    background: var(--panel-header-bg);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  .run-center {
-    margin: 0 auto;
-  }
-</style>
